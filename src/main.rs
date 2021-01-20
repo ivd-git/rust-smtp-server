@@ -16,7 +16,7 @@ mod smtp;
 struct Config {
     host: String,
     smtp_port: String,
-    rest_port: String
+    rest_port: u16
 }
 
 impl Config {
@@ -28,7 +28,7 @@ impl Config {
         )
     }
 
-    fn new(host: String, smtp_port: String, rest_port: String) -> Config {
+    fn new(host: String, smtp_port: String, rest_port: u16) -> Config {
         Config { host: host, smtp_port: smtp_port, rest_port: rest_port }
     }
 }
@@ -76,7 +76,7 @@ fn parse_args() -> Config {
     Config::new(
         matches.value_of(BIND_HOST_ARG_NAME).unwrap().to_string()
         , matches.value_of(BIND_PORT_PORT_NAME).unwrap().to_string()
-        , matches.value_of(BIND_REST_PORT_PORT_NAME).unwrap().to_string()
+        , matches.value_of(BIND_REST_PORT_PORT_NAME).unwrap().to_string().parse().unwrap()
     )
 }
 
@@ -112,11 +112,20 @@ fn main() {
         .unwrap_or_else(|e| panic!("Binding to {} failed: {}", &bind_address, e));
 
     let count_clone = mail_repository.clone();
-    let routes = warp::any().map(move || {
+    let get = warp::get().map(move || {
         let repo = count_clone.lock().unwrap();
         let response = smtp::ConnectionsResponse::new(repo.clone());
         warp::reply::json(&response)
     });
+
+    let delete_clone = mail_repository.clone();
+    let delete = warp::delete().map(move || {
+        let mut repo = delete_clone.lock().unwrap();
+        repo.clear();
+        "Wiped"
+    });
+
+    let routes = get.or(delete);
 
     // Handle incoming connections in parallel with workers equal to the number of cores
     let pool = ThreadPool::new(num_cpus::get());
@@ -124,7 +133,7 @@ fn main() {
     let ret = runtime::Builder::new_current_thread().enable_all().build();
 
     pool.execute(move || {
-        ret.unwrap().block_on(warp::serve(routes).run(([127, 0, 0, 1], 3030)));
+        ret.unwrap().block_on(warp::serve(routes).run(([127, 0, 0, 1], config.rest_port)));
     });    
 
     let message_clone = mail_repository.clone();
