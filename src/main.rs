@@ -30,7 +30,7 @@ impl Config {
 }
 
 /// Parse the bind address from the command line arguments
-fn parse_args() -> String {
+fn parse_args() -> Config {
     const BIND_HOST_ARG_NAME: &str = "host";
     const BIND_PORT_PORT_NAME: &str = "port";
 
@@ -57,10 +57,7 @@ fn parse_args() -> String {
         )
         .get_matches();
 
-    let config = Config::new(matches.value_of(BIND_HOST_ARG_NAME).unwrap().to_string(), matches.value_of(BIND_PORT_PORT_NAME).unwrap().to_string(), "".to_string());
-
-    println!("REST Port: {}", config.rest_port);
-    config.smtp_config()
+    Config::new(matches.value_of(BIND_HOST_ARG_NAME).unwrap().to_string(), matches.value_of(BIND_PORT_PORT_NAME).unwrap().to_string(), "".to_string())
 }
 
 /// Handle a client connection.
@@ -82,7 +79,10 @@ fn handle_connection(mut stream: TcpStream) {
 }
 
 fn main() {
-    let bind_address = parse_args();
+    let config = parse_args();
+    println!("REST Port: {}", config.rest_port);
+    
+    let bind_address = config.smtp_config();
 
     let listener = TcpListener::bind(&bind_address)
         .unwrap_or_else(|e| panic!("Binding to {} failed: {}", &bind_address, e));
