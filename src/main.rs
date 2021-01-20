@@ -9,6 +9,26 @@ use threadpool::ThreadPool;
 
 mod smtp;
 
+struct Config {
+    host: String,
+    smtp_port: String,
+    rest_port: String
+}
+
+impl Config {
+    fn smtp_config(&self) -> String {
+        format!(
+            "{}:{}",
+            self.host,
+            self.smtp_port
+        )
+    }
+
+    fn new(host: String, smtp_port: String, rest_port: String) -> Config {
+        Config { host: host, smtp_port: smtp_port, rest_port: rest_port }
+    }
+}
+
 /// Parse the bind address from the command line arguments
 fn parse_args() -> String {
     const BIND_HOST_ARG_NAME: &str = "host";
@@ -37,11 +57,10 @@ fn parse_args() -> String {
         )
         .get_matches();
 
-    format!(
-        "{}:{}",
-        matches.value_of(BIND_HOST_ARG_NAME).unwrap(),
-        matches.value_of(BIND_PORT_PORT_NAME).unwrap().to_string()
-    )
+    let config = Config::new(matches.value_of(BIND_HOST_ARG_NAME).unwrap().to_string(), matches.value_of(BIND_PORT_PORT_NAME).unwrap().to_string(), "".to_string());
+
+    println!("REST Port: {}", config.rest_port);
+    config.smtp_config()
 }
 
 /// Handle a client connection.
