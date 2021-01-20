@@ -33,6 +33,7 @@ impl Config {
 fn parse_args() -> Config {
     const BIND_HOST_ARG_NAME: &str = "host";
     const BIND_PORT_PORT_NAME: &str = "port";
+    const BIND_REST_PORT_PORT_NAME: &str = "rest-port";
 
     let matches = App::new("Rust SMTP server")
         .version("1.0")
@@ -55,9 +56,24 @@ fn parse_args() -> Config {
                         .map_err(|e: std::num::ParseIntError| -> String { e.to_string() })
                 }),
         )
+        .arg(
+            Arg::with_name(BIND_REST_PORT_PORT_NAME)
+                .short("r")
+                .help("REST APIs port")
+                .default_value("8080")
+                .validator(|s: String| -> Result<(), String> {
+                    s.parse::<u16>()
+                        .and(Ok(()))
+                        .map_err(|e: std::num::ParseIntError| -> String { e.to_string() })
+                }),
+        )
         .get_matches();
 
-    Config::new(matches.value_of(BIND_HOST_ARG_NAME).unwrap().to_string(), matches.value_of(BIND_PORT_PORT_NAME).unwrap().to_string(), "".to_string())
+    Config::new(
+        matches.value_of(BIND_HOST_ARG_NAME).unwrap().to_string()
+        , matches.value_of(BIND_PORT_PORT_NAME).unwrap().to_string()
+        ,  matches.value_of(BIND_REST_PORT_PORT_NAME).unwrap().to_string()
+    )
 }
 
 /// Handle a client connection.
@@ -81,7 +97,7 @@ fn handle_connection(mut stream: TcpStream) {
 fn main() {
     let config = parse_args();
     println!("REST Port: {}", config.rest_port);
-    
+
     let bind_address = config.smtp_config();
 
     let listener = TcpListener::bind(&bind_address)
