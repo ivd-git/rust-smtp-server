@@ -1,4 +1,5 @@
 use std::io::{BufRead, Error, Write};
+use serde::Serialize;
 
 // Client commands
 const HELO_START: &str = "HELO ";
@@ -14,7 +15,19 @@ const MSG_SEND_MESSAGE_CONTENT: &str = "354 Send message content";
 const MSG_BYE: &str = "221 Bye";
 const MSG_SYNTAX_ERROR: &str = "500 unexpected line";
 
+#[derive(Serialize, Clone)]
+pub struct ConnectionsResponse {
+    connections: Vec<Connection>
+}
+
+impl ConnectionsResponse {
+    pub fn new(connections: Vec<Connection>) -> ConnectionsResponse {
+        ConnectionsResponse { connections: connections }
+    }
+}
+
 /// An Email message
+#[derive(Serialize, Clone)]
 pub struct Message {
     sender: String,
     recipients: Vec<String>,
@@ -38,6 +51,7 @@ impl Message {
 /// SMTP States
 ///
 /// States are named by the next expected command(s).
+#[derive(Serialize, Clone)]
 enum State {
     Helo,
     Mail,
@@ -49,6 +63,7 @@ enum State {
 }
 
 /// The state of a SMTP connection.
+#[derive(Serialize, Clone)]
 pub struct Connection {
     state: State,
     sender_domain: String,

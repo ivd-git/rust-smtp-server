@@ -5,7 +5,11 @@ extern crate threadpool;
 use clap::{App, Arg};
 use std::io::BufReader;
 use std::net::{TcpListener, TcpStream};
+//use std::sync::mpsc;
+use std::sync::{mpsc, Arc, Mutex};
 use threadpool::ThreadPool;
+use warp::Filter;
+use tokio::{runtime};
 
 mod smtp;
 
@@ -72,13 +76,13 @@ fn parse_args() -> Config {
     Config::new(
         matches.value_of(BIND_HOST_ARG_NAME).unwrap().to_string()
         , matches.value_of(BIND_PORT_PORT_NAME).unwrap().to_string()
-        ,  matches.value_of(BIND_REST_PORT_PORT_NAME).unwrap().to_string()
+        , matches.value_of(BIND_REST_PORT_PORT_NAME).unwrap().to_string()
     )
 }
 
 /// Handle a client connection.
 /// If the SMTP communication was successful, print a list of messages on stdout.
-fn handle_connection(mut stream: TcpStream) {
+fn handle_connection(mut stream: TcpStream, tx: mpsc::Sender<smtp::Connection>) {
     let mut reader = BufReader::new(stream.try_clone().unwrap());
 
     match smtp::Connection::handle(&mut reader, &mut stream) {
@@ -89,26 +93,54 @@ fn handle_connection(mut stream: TcpStream) {
                 println!("To: {}", message.get_recipients().join(", "));
                 println!("{}", message.get_data());
             }
+            tx.send(result).unwrap()
         }
         Err(e) => eprintln!("Error communicating with client: {}", e),
     }
 }
 
 fn main() {
+    //let mut connections : Vec<smtp::Connection> = Vec::new();
+    let mail_repository = Arc::new(Mutex::new(Vec::<smtp::Connection>::new()));
+
+    let (tx , rx) : (mpsc::Sender<smtp::Connection>, mpsc::Receiver<smtp::Connection>) = mpsc::channel();
     let config = parse_args();
     println!("REST Port: {}", config.rest_port);
 
     let bind_address = config.smtp_config();
-
     let listener = TcpListener::bind(&bind_address)
         .unwrap_or_else(|e| panic!("Binding to {} failed: {}", &bind_address, e));
 
+    let count_clone = mail_repository.clone();
+    let routes = warp::any().map(move || {
+        let repo = count_clone.lock().unwrap();
+        let response = smtp::ConnectionsResponse::new(repo.clone());
+        warp::reply::json(&response)
+    });
+
     // Handle incoming connections in parallel with workers equal to the number of cores
     let pool = ThreadPool::new(num_cpus::get());
+
+    let ret = runtime::Builder::new_current_thread().enable_all().build();
+
+    pool.execute(move || {
+        ret.unwrap().block_on(warp::serve(routes).run(([127, 0, 0, 1], 3030)));
+    });    
+
+    let message_clone = mail_repository.clone();
+    pool.execute(move|| {
+        for received_connection in rx {
+            println!("Got message: {}", received_connection.get_sender_domain().unwrap_or_else(|| "Not found"));
+            let mut repo = message_clone.lock().unwrap(); 
+            repo.push(received_connection)
+        }
+    });
+
     for stream_result in listener.incoming() {
+        let tx_clone = mpsc::Sender::clone(&tx);
         match stream_result {
             Ok(stream) => pool.execute(|| {
-                handle_connection(stream);
+                handle_connection(stream, tx_clone);
             }),
             Err(e) => eprintln!("Unable to handle client connection: {}", e),
         }
