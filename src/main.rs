@@ -5,8 +5,7 @@ extern crate threadpool;
 use clap::{App, Arg};
 use std::io::BufReader;
 use std::net::{TcpListener, TcpStream};
-//use std::sync::mpsc;
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::{Arc, Mutex};
 use threadpool::ThreadPool;
 use warp::Filter;
 use tokio::{runtime};
@@ -82,7 +81,7 @@ fn parse_args() -> Config {
 
 /// Handle a client connection.
 /// If the SMTP communication was successful, print a list of messages on stdout.
-fn handle_connection(mut stream: TcpStream, tx: mpsc::Sender<smtp::Connection>) {
+fn handle_connection(mut stream: TcpStream, repo_clone: Arc<Mutex<Vec<smtp::Connection>>>) {
     let mut reader = BufReader::new(stream.try_clone().unwrap());
 
     match smtp::Connection::handle(&mut reader, &mut stream) {
@@ -93,7 +92,8 @@ fn handle_connection(mut stream: TcpStream, tx: mpsc::Sender<smtp::Connection>) 
                 println!("To: {}", message.get_recipients().join(", "));
                 println!("{}", message.get_data());
             }
-            tx.send(result).unwrap()
+            let mut repo = repo_clone.lock().unwrap();
+            repo.push(result);
         }
         Err(e) => eprintln!("Error communicating with client: {}", e),
     }
@@ -101,7 +101,6 @@ fn handle_connection(mut stream: TcpStream, tx: mpsc::Sender<smtp::Connection>) 
 
 fn main() {
     let mail_repository = Arc::new(Mutex::new(Vec::<smtp::Connection>::new()));
-    let (tx , rx) : (mpsc::Sender<smtp::Connection>, mpsc::Receiver<smtp::Connection>) = mpsc::channel();
     let config = parse_args();
     println!("REST Port: {}", config.rest_port);
 
@@ -134,20 +133,11 @@ fn main() {
         ret.unwrap().block_on(warp::serve(routes).run(([127, 0, 0, 1], config.rest_port)));
     });    
 
-    let message_clone = mail_repository.clone();
-    pool.execute(move|| {
-        for received_connection in rx {
-            println!("Got message: {}", received_connection.get_sender_domain().unwrap_or_else(|| "Not found"));
-            let mut repo = message_clone.lock().unwrap(); 
-            repo.push(received_connection)
-        }
-    });
-
     for stream_result in listener.incoming() {
-        let tx_clone = mpsc::Sender::clone(&tx);
+        let repo_clone = mail_repository.clone();
         match stream_result {
             Ok(stream) => pool.execute(|| {
-                handle_connection(stream, tx_clone);
+                handle_connection(stream, repo_clone);
             }),
             Err(e) => eprintln!("Unable to handle client connection: {}", e),
         }
