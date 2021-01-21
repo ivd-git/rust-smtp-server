@@ -100,9 +100,7 @@ fn handle_connection(mut stream: TcpStream, tx: mpsc::Sender<smtp::Connection>) 
 }
 
 fn main() {
-    //let mut connections : Vec<smtp::Connection> = Vec::new();
     let mail_repository = Arc::new(Mutex::new(Vec::<smtp::Connection>::new()));
-
     let (tx , rx) : (mpsc::Sender<smtp::Connection>, mpsc::Receiver<smtp::Connection>) = mpsc::channel();
     let config = parse_args();
     println!("REST Port: {}", config.rest_port);
