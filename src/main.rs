@@ -15,7 +15,7 @@ mod smtp;
 struct Config {
     host: String,
     smtp_port: String,
-    rest_port: u16
+    rest_port: u16,
 }
 
 impl Config {
@@ -53,30 +53,30 @@ fn parse_args() -> Config {
                 .short("p")
                 .help("Bind port")
                 .default_value("2525")
-                .validator(|s: String| -> Result<(), String> {
-                    s.parse::<u16>()
-                        .and(Ok(()))
-                        .map_err(|e: std::num::ParseIntError| -> String { e.to_string() })
-                }),
+                .validator(validate_port()),
         )
         .arg(
             Arg::with_name(BIND_REST_PORT_PORT_NAME)
                 .short("r")
                 .help("REST APIs port")
                 .default_value("8080")
-                .validator(|s: String| -> Result<(), String> {
-                    s.parse::<u16>()
-                        .and(Ok(()))
-                        .map_err(|e: std::num::ParseIntError| -> String { e.to_string() })
-                }),
+                .validator(validate_port()),
         )
         .get_matches();
 
     Config::new(
         matches.value_of(BIND_HOST_ARG_NAME).unwrap().to_string()
         , matches.value_of(BIND_PORT_PORT_NAME).unwrap().to_string()
-        , matches.value_of(BIND_REST_PORT_PORT_NAME).unwrap().to_string().parse().unwrap()
+        , matches.value_of(BIND_REST_PORT_PORT_NAME).unwrap().to_string().parse().unwrap(),
     )
+}
+
+fn validate_port() -> fn(String) -> Result<(), String> {
+    |s: String| -> Result<(), String> {
+        s.parse::<u16>()
+            .and(Ok(()))
+            .map_err(|e: std::num::ParseIntError| -> String { e.to_string() })
+    }
 }
 
 /// Handle a client connection.
@@ -104,10 +104,29 @@ fn main() {
     let config = parse_args();
     println!("REST Port: {}", config.rest_port);
 
+    let pool = ThreadPool::new(num_cpus::get());
+    start_rest_server(&mail_repository, &config, &pool);
+    start_smtp_server(mail_repository, &config, pool)
+}
+
+fn start_smtp_server(mail_repository: Arc<Mutex<Vec<smtp::Connection>>>, config: &Config, pool: ThreadPool) {
     let bind_address = config.smtp_config();
     let listener = TcpListener::bind(&bind_address)
         .unwrap_or_else(|e| panic!("Binding to {} failed: {}", &bind_address, e));
 
+
+    for stream_result in listener.incoming() {
+        let repo_clone = mail_repository.clone();
+        match stream_result {
+            Ok(stream) => pool.execute(|| {
+                handle_connection(stream, repo_clone);
+            }),
+            Err(e) => eprintln!("Unable to handle client connection: {}", e),
+        }
+    }
+}
+
+fn start_rest_server(mail_repository: &Arc<Mutex<Vec<smtp::Connection>>>, config: &Config, pool: &ThreadPool) {
     let count_clone = mail_repository.clone();
     let get = warp::get().map(move || {
         let repo = count_clone.lock().unwrap();
@@ -123,23 +142,9 @@ fn main() {
     });
 
     let routes = get.or(delete);
-
-    // Handle incoming connections in parallel with workers equal to the number of cores
-    let pool = ThreadPool::new(num_cpus::get());
-
     let ret = runtime::Builder::new_current_thread().enable_all().build();
-
+    let port = config.rest_port;
     pool.execute(move || {
-        ret.unwrap().block_on(warp::serve(routes).run(([127, 0, 0, 1], config.rest_port)));
-    });    
-
-    for stream_result in listener.incoming() {
-        let repo_clone = mail_repository.clone();
-        match stream_result {
-            Ok(stream) => pool.execute(|| {
-                handle_connection(stream, repo_clone);
-            }),
-            Err(e) => eprintln!("Unable to handle client connection: {}", e),
-        }
-    }
+        ret.unwrap().block_on(warp::serve(routes).run(([127, 0, 0, 1], port)));
+    });
 }
