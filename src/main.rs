@@ -46,7 +46,7 @@ fn parse_args() -> Config {
             Arg::with_name(BIND_HOST_ARG_NAME)
                 .short("h")
                 .help("Bind host")
-                .default_value("localhost"),
+                .default_value("127.0.0.1"),
         )
         .arg(
             Arg::with_name(BIND_PORT_PORT_NAME)
